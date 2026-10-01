@@ -287,12 +287,12 @@ by the device abstraction but was not available for testing on this machine.
 ```bash
 uv run python -m benchmarks.benchmark --device auto --requests 8 \
   --concurrency 1 2 4 8 16 --max-new-tokens 32 --warmup 1 \
-  --seed 42 --output benchmark-results.json
+  --seed 42 --output benchmarks/results/benchmark.json
 
 # Include synthetic arrivals after earlier decode work starts:
 uv run python -m benchmarks.benchmark --device auto --requests 8 \
   --concurrency 1 2 4 --arrival-interval 0.1 --max-new-tokens 32 \
-  --output benchmark-arrivals.json
+  --output benchmarks/results/benchmark-arrivals.json
 ```
 
 Run benchmark modules from the repository root. `--prompts prompts.json` accepts a JSON

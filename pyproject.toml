@@ -20,7 +20,7 @@ packages = ["src/minfer"]
 include = ["src/minfer", "docs", "benchmarks", "examples", "tests", "README.md", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.12"]
+dev = ["pytest>=8", "ruff>=0.12", "matplotlib>=3.9,<4"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

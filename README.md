@@ -31,7 +31,7 @@ Measured with **Qwen2.5-0.5B-Instruct on Apple Silicon MPS, float16**: eight une
 | minfer · 2 active | 3.92 | 65.1 | 1.57 |
 | minfer · 4 active | 2.48 | 102.8 | 0.71 |
 
-TTFT is time to first token. Queueing is included; model loading is excluded. Results depend on workload and hardware. [Raw results](benchmark-results.json) · [Methodology](docs/architecture.md#benchmarks) · [CPU/MPS smoke reports](benchmarks/results/)
+TTFT is time to first token. Queueing is included; model loading is excluded. Results depend on workload and hardware. [Raw results](benchmarks/results/mps-historical.json) · [Methodology](docs/architecture.md#benchmarks) · [CPU/MPS smoke reports](benchmarks/results/)
 
 ## Quick start
 
@@ -73,7 +73,7 @@ Read the [architecture guide](docs/architecture.md) for cache invariants, semant
 uv run pytest                         # fast tests; no model download
 uv run pytest -m integration          # real Qwen CPU/MPS parity tests
 uv run python -m benchmarks.benchmark --requests 8 \
-  --concurrency 1 2 4 --max-new-tokens 32 --output benchmark-results.json
+  --concurrency 1 2 4 --max-new-tokens 32 --output benchmarks/results/benchmark.json
 ```
 
 Verified with 30 fast tests and 8 integration cases on CPU float32 and MPS float16. CUDA support is implemented but untested on this machine.

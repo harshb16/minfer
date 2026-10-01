@@ -157,7 +157,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--prompts", type=Path, help="JSON array of prompt strings")
     parser.add_argument("--threads", type=int, default=4, help="CPU intra-op threads")
-    parser.add_argument("--output", type=Path, default=Path("benchmark-results.json"))
+    parser.add_argument("--output", type=Path, default=Path("benchmarks/results/benchmark.json"))
     args = parser.parse_args(argv)
     if args.warmup < 0 or args.threads < 1 or any(c < 1 for c in args.concurrency):
         parser.error("warmup must be nonnegative; threads and concurrency must be positive")
