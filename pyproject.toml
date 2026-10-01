@@ -17,7 +17,7 @@ build-backend = "hatchling.build"
 packages = ["src/minfer"]
 
 [tool.hatch.build.targets.sdist]
-include = ["src/minfer", "benchmarks", "examples", "tests", "README.md", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"]
+include = ["src/minfer", "docs", "benchmarks", "examples", "tests", "README.md", "pyproject.toml", "uv.lock", ".python-version", ".gitignore"]
 
 [dependency-groups]
 dev = ["pytest>=8", "ruff>=0.12"]
