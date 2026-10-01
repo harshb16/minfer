@@ -102,6 +102,40 @@ class ModelRunner:
         return ForwardResult(output.logits[:, -1, :], output.past_key_values)
 
     @torch.inference_mode()
+    def prefill_batch(self, prompts: Sequence[list[int]]) -> list[ForwardResult]:
+        """One left-padded forward; only real tokens survive in request caches."""
+        if not prompts or any(not ids for ids in prompts):
+            raise ValueError("Prefill requires a nonempty batch of nonempty prompts")
+        if len(prompts) == 1:
+            return [self.prefill(prompts[0])]
+        lengths = [len(ids) for ids in prompts]
+        width = max(lengths)
+        pad = self.tokenizer.pad_token_id
+        if pad is None:
+            pad = self.tokenizer.eos_token_id
+        if pad is None:
+            pad = 0  # Masked input only; never a semantic prompt token.
+        ids = torch.full((len(prompts), width), pad, device=self.device, dtype=torch.long)
+        mask = torch.zeros_like(ids)
+        for row, prompt in enumerate(prompts):
+            ids[row, -len(prompt) :] = torch.tensor(prompt, device=self.device)
+            mask[row, -len(prompt) :] = 1
+        positions = (mask.cumsum(-1) - 1).clamp_min(0)
+        output = self.model(
+            input_ids=ids,
+            attention_mask=mask,
+            position_ids=positions,
+            past_key_values=self.cache_manager.empty(),
+            use_cache=True,
+            logits_to_keep=1,
+        )
+        caches = self.cache_manager.split_prefill(output.past_key_values, lengths)
+        return [
+            ForwardResult(output.logits[row : row + 1, -1, :], cache)
+            for row, cache in enumerate(caches)
+        ]
+
+    @torch.inference_mode()
     def decode_one(self, token_id: int, cache: DynamicCache) -> ForwardResult:
         self.cache_manager.validate(cache)
         length = self.cache_manager.length(cache)

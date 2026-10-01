@@ -123,3 +123,19 @@ class HFCacheManager:
                 )
             )
         return result
+
+    def split_prefill(self, cache: DynamicCache, lengths: Sequence[int]) -> list[DynamicCache]:
+        """Discard left padding and clone each row into independent storage."""
+        if not lengths or any(length < 1 for length in lengths):
+            raise ValueError("Expected nonempty positive prompt lengths")
+        self.validate(cache, batch_size=len(lengths))
+        if self.length(cache) != max(lengths):
+            raise ValueError("Prefill cache length must match longest prompt")
+        layers = self.layers(cache)
+        return [
+            self.from_layers(
+                (k[row : row + 1, :, -length:, :].clone(), v[row : row + 1, :, -length:, :].clone())
+                for k, v in layers
+            )
+            for row, length in enumerate(lengths)
+        ]

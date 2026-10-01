@@ -42,6 +42,7 @@ class LLMEngine:
             self.config.max_kv_tokens,
         )
         self.sampler = Sampler()
+        self.last_step: dict[str, int] = {}
 
     def add_request(
         self,
@@ -105,19 +106,24 @@ class LLMEngine:
         """
         plan = self.scheduler.plan_step()
         previous, admitted = plan.decode, plan.prefill
+        self.last_step = {
+            "prefill_batch_size": len(admitted),
+            "prefill_tokens": sum(r.prompt_length for r in admitted),
+            "decode_batch_size": len(previous),
+            "scheduled_tokens_this_step": plan.scheduled_tokens,
+        }
         events = []
-        for request in admitted:
+        if admitted:
             try:
-                state = self.runner.prefill(request.prompt_token_ids)
-                request.cache = state.cache
-                request.kv_tokens = request.prompt_length
-                token = self.sampler.sample(
-                    state.logits[0], request.sampling_params, request.generator
-                )
-                events.append(self._emit(request, token))
+                states = self.runner.prefill_batch([r.prompt_token_ids for r in admitted])
+                for request, state in zip(admitted, states, strict=True):
+                    request.cache = state.cache
+                    request.kv_tokens = request.prompt_length
+                    token = self.sampler.sample(
+                        state.logits[0], request.sampling_params, request.generator
+                    )
+                    events.append(self._emit(request, token))
             except Exception:
-                # Remaining admissions have no cache yet and must not become
-                # invalid running requests if a prefill fails.
                 for affected in admitted:
                     if affected.status == RequestStatus.RUNNING:
                         self.scheduler.abort(affected.request_id)

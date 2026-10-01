@@ -80,3 +80,10 @@ def test_qwen_engine_batch_and_late_arrival_parity(qwen_runner):
     assert [list(engine.get_result(i).token_ids) for i in ids] == expected
     assert not engine.scheduler.running
     assert all(engine.get_request(i).cache is None for i in ids)
+
+
+def test_qwen_batched_prefill_parity(qwen_runner):
+    from tests.test_prefill import assert_prefill_parity
+
+    atol, rtol = (3e-2, 3e-2) if qwen_runner.device.type == "mps" else (1e-4, 1e-4)
+    assert_prefill_parity(qwen_runner, [qwen_runner.tokenize(p) for p in PROMPTS], atol, rtol)

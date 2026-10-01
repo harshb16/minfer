@@ -109,7 +109,7 @@ def run_engine(
                     "elapsed_seconds": time.perf_counter() - start,
                     "running_before": [labels[i] for i in before],
                     "waiting_before": waiting,
-                    "decode_batch_size": len(before),
+                    **engine.last_step,
                     "prefilled": [
                         labels[e.request_id] for e in events if e.request_id not in before
                     ],

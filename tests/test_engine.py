@@ -118,7 +118,7 @@ def test_unicode_stream_buffers_incomplete_bytes(tiny_runner):
 def test_prefill_failure_cleans_all_admissions(tiny_runner):
     e = engine(tiny_runner)
     ids = [e.add_request(p) for p in ["A", "B"]]
-    with patch.object(tiny_runner, "prefill", side_effect=RuntimeError("prefill failed")):
+    with patch.object(tiny_runner, "prefill_batch", side_effect=RuntimeError("prefill failed")):
         with pytest.raises(RuntimeError, match="prefill failed"):
             e.step()
     assert not e.has_unfinished_requests()
