@@ -1,12 +1,16 @@
 """A synchronous engine with one-token-per-request scheduler steps."""
 
 from collections.abc import Sequence
+from dataclasses import asdict
 from time import perf_counter
 from uuid import uuid4
+
+from transformers.cache_utils import DynamicCache
 
 from .config import MODEL_ID, EngineConfig, SamplingParams
 from .events import GenerationResult, TokenEvent
 from .model_runner import ModelRunner
+from .paged_cache import PagedKVManager
 from .request import Request, RequestStatus
 from .sampler import Sampler
 from .scheduler import Scheduler
@@ -23,6 +27,9 @@ class LLMEngine:
         max_active_requests: int = 4,
         max_batched_tokens: int | None = None,
         max_kv_tokens: int | None = None,
+        cache_mode: str = "dynamic",
+        kv_block_size: int = 16,
+        num_kv_blocks: int = 256,
         chat_template: bool = True,
         runner: ModelRunner | None = None,
     ) -> None:
@@ -33,16 +40,25 @@ class LLMEngine:
             max_active_requests=max_active_requests,
             max_batched_tokens=max_batched_tokens,
             max_kv_tokens=max_kv_tokens,
+            cache_mode=cache_mode,
+            kv_block_size=kv_block_size,
+            num_kv_blocks=num_kv_blocks,
             chat_template=chat_template,
         )
         self.runner = runner if runner is not None else ModelRunner(self.config)
+        self.paged_cache = (
+            PagedKVManager(self.config.kv_block_size, self.config.num_kv_blocks)
+            if self.config.cache_mode == "paged"
+            else None
+        )
         self.scheduler = Scheduler(
             self.config.max_active_requests,
             self.config.max_batched_tokens,
             self.config.max_kv_tokens,
+            None if self.paged_cache is None else self.paged_cache.blocks,
         )
         self.sampler = Sampler()
-        self.last_step: dict[str, int] = {}
+        self.last_step: dict = {}
 
     def add_request(
         self,
@@ -73,6 +89,25 @@ class LLMEngine:
 
     def get_request(self, request_id: str) -> Request:
         return self.scheduler.requests[request_id]
+
+    def _store_cache(self, request: Request, cache: DynamicCache) -> None:
+        request.kv_tokens = self.runner.cache_manager.length(cache)
+        if self.paged_cache is None:
+            request.cache = cache
+        else:
+            self.paged_cache.write(request.request_id, cache)
+            request.cache = None
+            metrics = asdict(self.paged_cache.blocks.metrics())
+            peak = self.last_step.get("kv_metrics_peak")
+            if peak is None or metrics["used_blocks"] >= peak["used_blocks"]:
+                self.last_step["kv_metrics_peak"] = metrics
+
+    def _load_cache(self, request: Request) -> DynamicCache:
+        if self.paged_cache is not None:
+            return self.paged_cache.materialize(request.request_id)
+        if request.cache is None:
+            raise RuntimeError("RUNNING requests need persistent KV state")
+        return request.cache
 
     def _emit(self, request: Request, token: int) -> TokenEvent:
         request.generated_token_ids.append(token)
@@ -117,8 +152,7 @@ class LLMEngine:
             try:
                 states = self.runner.prefill_batch([r.prompt_token_ids for r in admitted])
                 for request, state in zip(admitted, states, strict=True):
-                    request.cache = state.cache
-                    request.kv_tokens = request.prompt_length
+                    self._store_cache(request, state.cache)
                     token = self.sampler.sample(
                         state.logits[0], request.sampling_params, request.generator
                     )
@@ -129,15 +163,14 @@ class LLMEngine:
                         self.scheduler.abort(affected.request_id)
                 raise
         if previous:
-            if any(r.cache is None or r.pending_token is None for r in previous):
+            if any(r.pending_token is None for r in previous):
                 raise RuntimeError("RUNNING requests need a cache and pending token")
             try:
                 logits, caches = self.runner.decode_batch(
-                    [r.pending_token for r in previous], [r.cache for r in previous]
+                    [r.pending_token for r in previous], [self._load_cache(r) for r in previous]
                 )
                 for row, (request, cache) in enumerate(zip(previous, caches, strict=True)):
-                    request.cache = cache
-                    request.kv_tokens += 1
+                    self._store_cache(request, cache)
                     token = self.sampler.sample(
                         logits[row], request.sampling_params, request.generator
                     )
@@ -149,6 +182,8 @@ class LLMEngine:
                     if request.status == RequestStatus.RUNNING:
                         self.scheduler.abort(request.request_id)
                 raise
+        if self.paged_cache is not None:
+            self.last_step["kv_metrics"] = asdict(self.paged_cache.blocks.metrics())
         return events
 
     def abort_request(self, request_id: str) -> TokenEvent:

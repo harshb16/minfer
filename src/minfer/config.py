@@ -14,6 +14,9 @@ class EngineConfig:
     max_active_requests: int = 4
     max_batched_tokens: int | None = None
     max_kv_tokens: int | None = None
+    cache_mode: str = "dynamic"
+    kv_block_size: int = 16
+    num_kv_blocks: int = 256
     chat_template: bool = True
     cache_dir: str | None = None
 
@@ -24,6 +27,10 @@ class EngineConfig:
             value = getattr(self, name)
             if value is not None and value < 1:
                 raise ValueError(f"{name} must be positive or None")
+        if self.cache_mode not in {"dynamic", "paged"}:
+            raise ValueError("cache_mode must be dynamic or paged")
+        if self.kv_block_size < 1 or self.num_kv_blocks < 1:
+            raise ValueError("KV block size and count must be positive")
         if self.dtype not in {"auto", "float16", "bfloat16", "float32"}:
             raise ValueError("dtype must be auto, float16, bfloat16, or float32")
 

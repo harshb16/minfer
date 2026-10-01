@@ -4,6 +4,7 @@ from collections import deque
 from dataclasses import dataclass
 from time import perf_counter
 
+from .paged_cache import BlockManager
 from .request import Request, RequestStatus
 
 
@@ -31,6 +32,7 @@ class Scheduler:
         max_active_requests: int,
         max_batched_tokens: int | None = None,
         max_kv_tokens: int | None = None,
+        block_manager: BlockManager | None = None,
     ) -> None:
         if max_active_requests < 1:
             raise ValueError("max_active_requests must be positive")
@@ -40,6 +42,7 @@ class Scheduler:
         self.max_active_requests = max_active_requests
         self.max_batched_tokens = max_batched_tokens
         self.max_kv_tokens = max_kv_tokens
+        self.block_manager = block_manager
         self.scheduled_tokens_this_step = 0
         self.waiting: deque[Request] = deque()
         self.running: dict[str, Request] = {}
@@ -55,6 +58,12 @@ class Scheduler:
             raise ValueError("Prompt can never fit max_batched_tokens (no chunked prefill)")
         if self.max_kv_tokens is not None and request.max_kv_tokens > self.max_kv_tokens:
             raise ValueError("Request can never fit max_kv_tokens including decode growth")
+        if (
+            self.block_manager is not None
+            and self.block_manager.blocks_needed(request.max_kv_tokens)
+            > self.block_manager.num_blocks
+        ):
+            raise ValueError("Request can never fit KV block pool including decode growth")
         self.requests[request.request_id] = request
         self.waiting.append(request)
 
@@ -62,6 +71,9 @@ class Scheduler:
         used = sum(r.kv_tokens for r in self.running.values())
         reserved = sum(r.max_kv_tokens for r in self.running.values())
         capacity = self.max_kv_tokens
+        if self.block_manager is not None:
+            physical = self.block_manager.num_blocks * self.block_manager.block_size
+            capacity = physical if capacity is None else min(capacity, physical)
         return ResourceUsage(
             len(self.running),
             len(self.waiting),
@@ -81,6 +93,12 @@ class Scheduler:
         admitted = []
         budget = self.max_batched_tokens if token_budget is None else token_budget
         reserved = self.usage().reserved_kv_tokens
+        blocks = self.block_manager
+        reserved_blocks = (
+            0
+            if blocks is None
+            else sum(blocks.blocks_needed(r.max_kv_tokens) for r in self.running.values())
+        )
         while self.waiting and len(self.running) < self.max_active_requests:
             request = self.waiting[0]
             if budget is not None and request.prompt_length > budget:
@@ -90,6 +108,14 @@ class Scheduler:
                 and reserved + request.max_kv_tokens > self.max_kv_tokens
             ):
                 break
+            if blocks is not None:
+                required = blocks.blocks_needed(request.max_kv_tokens)
+                if (
+                    reserved_blocks + required > blocks.num_blocks
+                    or blocks.blocks_needed(request.prompt_length) > blocks.free_blocks
+                ):
+                    break
+                reserved_blocks += required
             self.waiting.popleft()
             request.status = RequestStatus.RUNNING
             self.running[request.request_id] = request
@@ -118,6 +144,8 @@ class Scheduler:
         request.status = RequestStatus.FINISHED
         request.finish_reason = reason
         request.finish_time = perf_counter()
+        if self.block_manager is not None and self.block_manager.contains(request.request_id):
+            self.block_manager.free(request.request_id)
         request.cache = None
         request.kv_tokens = 0
         request.pending_token = None
@@ -133,6 +161,8 @@ class Scheduler:
         request.status = RequestStatus.ABORTED
         request.finish_reason = "aborted"
         request.finish_time = perf_counter()
+        if self.block_manager is not None and self.block_manager.contains(request.request_id):
+            self.block_manager.free(request.request_id)
         request.cache = None
         request.kv_tokens = 0
         request.pending_token = None

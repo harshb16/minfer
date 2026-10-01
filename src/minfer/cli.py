@@ -22,6 +22,9 @@ def main(argv: list[str] | None = None) -> int:
     generate.add_argument("--max-active-requests", type=int, default=4)
     generate.add_argument("--max-batched-tokens", type=int)
     generate.add_argument("--max-kv-tokens", type=int)
+    generate.add_argument("--cache-mode", choices=["dynamic", "paged"], default="dynamic")
+    generate.add_argument("--kv-block-size", type=int, default=16)
+    generate.add_argument("--num-kv-blocks", type=int, default=256)
     generate.add_argument("--max-new-tokens", type=int, default=64)
     generate.add_argument("--temperature", type=float, default=0)
     generate.add_argument("--top-k", type=int, default=0)
@@ -46,6 +49,9 @@ def main(argv: list[str] | None = None) -> int:
             max_active_requests=args.max_active_requests,
             max_batched_tokens=args.max_batched_tokens,
             max_kv_tokens=args.max_kv_tokens,
+            cache_mode=args.cache_mode,
+            kv_block_size=args.kv_block_size,
+            num_kv_blocks=args.num_kv_blocks,
             chat_template=not args.raw_prompt,
         )
         ids = [engine.add_request(prompt, params) for prompt in args.prompt]

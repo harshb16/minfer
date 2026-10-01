@@ -4,7 +4,7 @@ import argparse
 import json
 import platform
 import time
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 import torch
@@ -110,6 +110,7 @@ def run_engine(
                     "running_before": [labels[i] for i in before],
                     "waiting_before": waiting,
                     **engine.last_step,
+                    "resources": asdict(engine.scheduler.usage()),
                     "prefilled": [
                         labels[e.request_id] for e in events if e.request_id not in before
                     ],
@@ -130,6 +131,8 @@ def run_engine(
     summary = summarize(
         f"engine-active-{capacity}", wall, measurements, allocated_memory(runner.device)
     )
+    summary["concurrency"] = capacity
+    summary["cache_mode"] = engine.config.cache_mode
     summary["iteration_trace"] = iteration_trace
     return summary
 
@@ -139,6 +142,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--model", default=EngineConfig().model)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--dtype", default="auto")
+    parser.add_argument("--cache-mode", choices=["dynamic", "paged"], default="dynamic")
+    parser.add_argument("--kv-block-size", type=int, default=16)
+    parser.add_argument("--num-kv-blocks", type=int, default=256)
+    parser.add_argument("--max-kv-tokens", type=int)
+    parser.add_argument("--max-batched-tokens", type=int)
     parser.add_argument("--requests", type=int, default=8)
     parser.add_argument("--concurrency", type=int, nargs="+", default=[1, 2, 4, 8, 16])
     parser.add_argument("--max-new-tokens", type=int, default=32)
@@ -158,7 +166,16 @@ def main(argv: list[str] | None = None) -> int:
     torch.manual_seed(args.seed)
     prompts = json.loads(args.prompts.read_text()) if args.prompts else None
     items = workload(args.requests, args.seed, args.arrival_interval, prompts)
-    config = EngineConfig(model=args.model, device=args.device, dtype=args.dtype)
+    config = EngineConfig(
+        model=args.model,
+        device=args.device,
+        dtype=args.dtype,
+        cache_mode=args.cache_mode,
+        kv_block_size=args.kv_block_size,
+        num_kv_blocks=args.num_kv_blocks,
+        max_kv_tokens=args.max_kv_tokens,
+        max_batched_tokens=args.max_batched_tokens,
+    )
     runner = ModelRunner(config)
     for item in items:
         if len(runner.tokenize(item.prompt)) + args.max_new_tokens - 1 > (
@@ -188,6 +205,11 @@ def main(argv: list[str] | None = None) -> int:
     report = {
         "metadata": {
             "model": args.model,
+            "cache_mode": args.cache_mode,
+            "kv_block_size": args.kv_block_size,
+            "num_kv_blocks": args.num_kv_blocks,
+            "max_kv_tokens": args.max_kv_tokens,
+            "max_batched_tokens": args.max_batched_tokens,
             "device": str(runner.device),
             "dtype": str(runner.dtype),
             "torch": torch.__version__,
