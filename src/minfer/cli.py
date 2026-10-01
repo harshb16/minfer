@@ -20,6 +20,8 @@ def main(argv: list[str] | None = None) -> int:
         "--dtype", default="auto", choices=["auto", "float16", "bfloat16", "float32"]
     )
     generate.add_argument("--max-active-requests", type=int, default=4)
+    generate.add_argument("--max-batched-tokens", type=int)
+    generate.add_argument("--max-kv-tokens", type=int)
     generate.add_argument("--max-new-tokens", type=int, default=64)
     generate.add_argument("--temperature", type=float, default=0)
     generate.add_argument("--top-k", type=int, default=0)
@@ -42,6 +44,8 @@ def main(argv: list[str] | None = None) -> int:
             device=args.device,
             dtype=args.dtype,
             max_active_requests=args.max_active_requests,
+            max_batched_tokens=args.max_batched_tokens,
+            max_kv_tokens=args.max_kv_tokens,
             chat_template=not args.raw_prompt,
         )
         ids = [engine.add_request(prompt, params) for prompt in args.prompt]

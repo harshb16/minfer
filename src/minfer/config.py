@@ -12,12 +12,18 @@ class EngineConfig:
     device: str = "auto"
     dtype: str = "auto"
     max_active_requests: int = 4
+    max_batched_tokens: int | None = None
+    max_kv_tokens: int | None = None
     chat_template: bool = True
     cache_dir: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_active_requests < 1:
             raise ValueError("max_active_requests must be positive")
+        for name in ("max_batched_tokens", "max_kv_tokens"):
+            value = getattr(self, name)
+            if value is not None and value < 1:
+                raise ValueError(f"{name} must be positive or None")
         if self.dtype not in {"auto", "float16", "bfloat16", "float32"}:
             raise ValueError("dtype must be auto, float16, bfloat16, or float32")
 

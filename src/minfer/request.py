@@ -29,6 +29,7 @@ class Request:
     generated_token_ids: list[int] = field(default_factory=list)
     status: RequestStatus = RequestStatus.WAITING
     cache: "DynamicCache | None" = None
+    kv_tokens: int = 0
     pending_token: int | None = None
     arrival_time: float = field(default_factory=perf_counter)
     first_token_time: float | None = None
@@ -50,3 +51,8 @@ class Request:
     @property
     def num_generated_tokens(self) -> int:
         return len(self.generated_token_ids)
+
+    @property
+    def max_kv_tokens(self) -> int:
+        """Worst-case consumed history; the final generated token is never cached."""
+        return self.prompt_length + self.sampling_params.max_new_tokens - 1

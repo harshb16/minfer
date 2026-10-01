@@ -138,3 +138,24 @@ def test_greedy_sampling_does_not_change_rng(tiny_runner):
     before = e.get_request(i).generator.get_state().clone()
     e.step()
     assert torch.equal(before, e.get_request(i).generator.get_state())
+
+
+def test_token_budgets_allow_completion_and_waiting_progress(tiny_runner):
+    e = LLMEngine(
+        config=EngineConfig(
+            device="cpu", max_active_requests=3, max_batched_tokens=5, max_kv_tokens=8
+        ),
+        runner=tiny_runner,
+    )
+    params = SamplingParams(max_new_tokens=4, stop_on_eos=False)
+    ids = [e.add_request(p, params) for p in ("abc", "def", "z")]
+    steps = 0
+    while e.has_unfinished_requests():
+        events = e.step()
+        assert len({x.request_id for x in events}) == len(events)
+        assert e.scheduler.usage().used_kv_tokens <= 8
+        assert e.scheduler.usage().scheduled_tokens_this_step <= 5
+        steps += 1
+        assert steps < 20
+    assert e.scheduler.usage().used_kv_tokens == 0
+    assert all(len(e.get_result(i).token_ids) == 4 for i in ids)

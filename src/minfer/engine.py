@@ -21,6 +21,8 @@ class LLMEngine:
         device: str = "auto",
         dtype: str = "auto",
         max_active_requests: int = 4,
+        max_batched_tokens: int | None = None,
+        max_kv_tokens: int | None = None,
         chat_template: bool = True,
         runner: ModelRunner | None = None,
     ) -> None:
@@ -29,10 +31,16 @@ class LLMEngine:
             device=device,
             dtype=dtype,
             max_active_requests=max_active_requests,
+            max_batched_tokens=max_batched_tokens,
+            max_kv_tokens=max_kv_tokens,
             chat_template=chat_template,
         )
         self.runner = runner if runner is not None else ModelRunner(self.config)
-        self.scheduler = Scheduler(self.config.max_active_requests)
+        self.scheduler = Scheduler(
+            self.config.max_active_requests,
+            self.config.max_batched_tokens,
+            self.config.max_kv_tokens,
+        )
         self.sampler = Sampler()
 
     def add_request(
@@ -95,13 +103,14 @@ class LLMEngine:
         are excluded from this call's decode batch. Freed slots are reused on
         the next call, avoiding unbounded admission loops for one-token jobs.
         """
-        previous = list(self.scheduler.running.values())
-        admitted = self.scheduler.admit()
+        plan = self.scheduler.plan_step()
+        previous, admitted = plan.decode, plan.prefill
         events = []
         for request in admitted:
             try:
                 state = self.runner.prefill(request.prompt_token_ids)
                 request.cache = state.cache
+                request.kv_tokens = request.prompt_length
                 token = self.sampler.sample(
                     state.logits[0], request.sampling_params, request.generator
                 )
@@ -122,6 +131,7 @@ class LLMEngine:
                 )
                 for row, (request, cache) in enumerate(zip(previous, caches, strict=True)):
                     request.cache = cache
+                    request.kv_tokens += 1
                     token = self.sampler.sample(
                         logits[row], request.sampling_params, request.generator
                     )
