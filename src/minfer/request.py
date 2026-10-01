@@ -29,7 +29,6 @@ class Request:
     generated_token_ids: list[int] = field(default_factory=list)
     status: RequestStatus = RequestStatus.WAITING
     cache: "DynamicCache | None" = None
-    kv_tokens: int = 0
     pending_token: int | None = None
     arrival_time: float = field(default_factory=perf_counter)
     first_token_time: float | None = None
@@ -37,6 +36,7 @@ class Request:
     finish_reason: str | None = None
     emitted_text: str = ""
     generator: torch.Generator = field(default_factory=torch.Generator, repr=False)
+    kv_tokens: int = 0
 
     def __post_init__(self) -> None:
         if self.sampling_params.seed is None:

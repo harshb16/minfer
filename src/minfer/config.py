@@ -12,13 +12,13 @@ class EngineConfig:
     device: str = "auto"
     dtype: str = "auto"
     max_active_requests: int = 4
+    chat_template: bool = True
+    cache_dir: str | None = None
     max_batched_tokens: int | None = None
     max_kv_tokens: int | None = None
     cache_mode: str = "dynamic"
     kv_block_size: int = 16
     num_kv_blocks: int = 256
-    chat_template: bool = True
-    cache_dir: str | None = None
 
     def __post_init__(self) -> None:
         if self.max_active_requests < 1:

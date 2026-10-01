@@ -6,7 +6,7 @@ import torch
 from benchmarks.benchmark import run_engine, run_reference
 from benchmarks.report import percentile
 from benchmarks.workloads import WorkItem, workload
-from minfer import LLMEngine
+from minfer import EngineConfig, LLMEngine
 from minfer.cli import main
 from minfer.device import allocated_memory, select_device, select_dtype, synchronize
 
@@ -89,3 +89,10 @@ def test_workloads_and_percentiles():
         workload(0, 42, 0)
     with pytest.raises(ValueError):
         workload(1, 42, 0, [])
+
+
+def test_existing_positional_config_fields_keep_their_meaning():
+    config = EngineConfig("model", "cpu", "float32", 2, False, "weights")
+    assert config.chat_template is False and config.cache_dir == "weights"
+    assert config.max_batched_tokens is None and config.max_kv_tokens is None
+    assert config.cache_mode == "dynamic"
