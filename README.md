@@ -55,14 +55,20 @@ and excludes model loading. [CPU benchmark report](benchmarks/reports/cpu-budget
 
 ## Architecture
 
-```mermaid
-flowchart LR
-    A[Prompts] --> B[FIFO admission + token budgets]
-    B --> C[Batched prefill / ragged decode]
-    C --> D[HF model.forward]
-    D --> E[Sample + stream + finish]
-    E --> B
-    K[Dynamic cache / paged KV blocks] <-->|split / materialize / append| C
+```text
+Prompts
+  |
+  v
+FIFO admission <-----------------------------------------------+
+  |                                                            |
+  v                                                            |
+Batched prefill / ragged decode <--> Dynamic cache / KV blocks |
+  |                                                            |
+  v                                                            |
+Hugging Face model forward                                     |
+  |                                                            |
+  v                                                            |
+Sample, stream, and finish ------------------------------------+
 ```
 
 Each step reserves decode work first, then admits whole FIFO prompts from the remaining
