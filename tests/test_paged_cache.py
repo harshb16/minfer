@@ -242,6 +242,34 @@ def test_paged_waiting_progress_lazy_growth_and_terminal_peak(tiny_runner):
     assert e.last_step["kv_metrics"]["used_blocks"] == 0
 
 
+def test_batch_block_limit_preserves_existing_allocation(tiny_runner):
+    e = LLMEngine(cache_mode="paged", kv_block_size=4, num_kv_blocks=2, runner=tiny_runner)
+    params = SamplingParams(max_new_tokens=3, stop_on_eos=False)
+    running = e.add_request("abc", params)
+    e.step()
+    blocks = e.paged_cache.blocks
+    table = blocks.table(running)
+    metrics = blocks.metrics()
+    usage = e.scheduler.usage()
+
+    with pytest.raises(ValueError, match="KV block pool"):
+        e.generate_batch(["ok", "1234567"], params)
+
+    assert list(e.scheduler.requests) == [running]
+    assert list(e.scheduler.running) == [running]
+    assert not e.scheduler.waiting
+    assert blocks.table(running) == table
+    assert blocks.metrics() == metrics
+    assert e.scheduler.usage() == usage
+    blocks.validate()
+
+    # Each fits alone, even though the requests together exceed the block pool.
+    results = e.generate_batch(["abc", "def"], params)
+    assert [r.prompt for r in results] == ["abc", "def"]
+    assert e.get_result(running).finish_reason == "length"
+    assert blocks.free_blocks == 2
+
+
 @pytest.mark.parametrize(
     "kwargs",
     [

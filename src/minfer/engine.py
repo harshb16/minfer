@@ -68,21 +68,26 @@ class LLMEngine:
         request_id: str | None = None,
     ) -> str:
         """Tokenize immediately; admission and prefill happen on a later step."""
+        request = self._prepare_request(prompt, sampling_params, request_id)
+        self.scheduler.add(request)
+        return request.request_id
+
+    def _prepare_request(
+        self, prompt: str, sampling_params: SamplingParams | None, request_id: str | None = None
+    ) -> Request:
         arrival = perf_counter()
         params = sampling_params or SamplingParams()
         ids = self.runner.tokenize(prompt)
         context_limit = self.runner.model.config.max_position_embeddings
         if len(ids) + params.max_new_tokens - 1 > context_limit:
             raise ValueError(f"Prompt and generation exceed model context limit {context_limit}")
-        request = Request(
+        return Request(
             request_id if request_id is not None else uuid4().hex,
             prompt,
             ids,
             params,
             arrival_time=arrival,
         )
-        self.scheduler.add(request)
-        return request.request_id
 
     def has_unfinished_requests(self) -> bool:
         return self.scheduler.has_unfinished()
@@ -216,8 +221,10 @@ class LLMEngine:
     def generate_batch(
         self, prompts: Sequence[str], sampling_params: SamplingParams | None = None
     ) -> list[GenerationResult]:
-        """Submit all prompts and drain the engine, including previously queued work."""
-        ids = [self.add_request(prompt, sampling_params) for prompt in prompts]
+        """Validate and submit the batch, then drain all outstanding engine work."""
+        ids = self.scheduler.add_batch(
+            self._prepare_request(prompt, sampling_params) for prompt in prompts
+        )
         while self.has_unfinished_requests():
             self.step()
         return [self.get_result(request_id) for request_id in ids]

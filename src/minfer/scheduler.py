@@ -1,6 +1,7 @@
 """FIFO admission with independent active and completed request records."""
 
 from collections import deque
+from collections.abc import Iterable
 from dataclasses import dataclass
 from time import perf_counter
 
@@ -50,8 +51,22 @@ class Scheduler:
         self.requests: dict[str, Request] = {}
 
     def add(self, request: Request) -> None:
-        if request.request_id in self.requests:
-            raise ValueError(f"Duplicate request ID: {request.request_id}")
+        self.add_batch((request,))
+
+    def add_batch(self, requests: Iterable[Request]) -> list[str]:
+        """Validate every request before registering the batch in FIFO order."""
+        pending: dict[str, Request] = {}
+        for request in requests:
+            request_id = request.request_id
+            if request_id in self.requests or request_id in pending:
+                raise ValueError(f"Duplicate request ID: {request_id}")
+            self._validate_request(request)
+            pending[request_id] = request
+        self.requests.update(pending)
+        self.waiting.extend(pending.values())
+        return list(pending)
+
+    def _validate_request(self, request: Request) -> None:
         if request.status != RequestStatus.WAITING:
             raise ValueError("Only WAITING requests can be submitted")
         if self.max_batched_tokens is not None and request.prompt_length > self.max_batched_tokens:
@@ -64,8 +79,6 @@ class Scheduler:
             > self.block_manager.num_blocks
         ):
             raise ValueError("Request can never fit KV block pool including decode growth")
-        self.requests[request.request_id] = request
-        self.waiting.append(request)
 
     def usage(self) -> ResourceUsage:
         used = sum(r.kv_tokens for r in self.running.values())

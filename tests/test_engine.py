@@ -132,6 +132,61 @@ def test_context_bound_and_empty_prompt(tiny_runner):
     assert tiny_runner.tokenize("") == [1]
 
 
+def test_rejected_batch_cannot_emit_a_token(tiny_runner):
+    e = engine(tiny_runner)
+    params = SamplingParams(max_new_tokens=2)
+    with pytest.raises(ValueError, match="context"):
+        e.generate_batch(["hi", "x" * 256], params)
+
+    assert e.step() == []
+    assert not e.has_unfinished_requests()
+    assert not e.scheduler.requests
+    assert e.scheduler.usage().reserved_kv_tokens == 0
+
+
+def test_rejected_batch_preserves_work_for_next_batch(tiny_runner):
+    e = engine(tiny_runner, capacity=1)
+    params = SamplingParams(max_new_tokens=3, stop_on_eos=False)
+    running = e.add_request("running", params)
+    waiting = e.add_request("waiting", params)
+    assert [event.request_id for event in e.step()] == [running]
+    active = e.get_request(running)
+    cache = active.cache
+    usage = e.scheduler.usage()
+
+    with pytest.raises(ValueError, match="context"):
+        e.generate_batch(["rejected", "x" * 256], params)
+
+    assert list(e.scheduler.requests) == [running, waiting]
+    assert list(e.scheduler.running) == [running]
+    assert [r.request_id for r in e.scheduler.waiting] == [waiting]
+    assert active.num_generated_tokens == 1
+    assert active.cache is cache
+    assert e.scheduler.usage() == usage
+
+    prompts = ["new prompt", "another"]
+    results = e.generate_batch(prompts, params)
+    assert [result.prompt for result in results] == prompts
+    assert list(e.scheduler.finished) == [running, waiting, *(r.request_id for r in results)]
+    assert all(len(e.get_result(i).token_ids) == 3 for i in e.scheduler.finished)
+    assert not e.has_unfinished_requests()
+
+
+@pytest.mark.parametrize("cache_mode", ["dynamic", "paged"])
+@pytest.mark.parametrize(("limit", "capacity"), [("max_batched_tokens", 4), ("max_kv_tokens", 6)])
+def test_batch_reuses_token_limit_validation(tiny_runner, cache_mode, limit, capacity):
+    e = LLMEngine(cache_mode=cache_mode, runner=tiny_runner, **{limit: capacity})
+    params = SamplingParams(max_new_tokens=3, stop_on_eos=False)
+    with pytest.raises(ValueError, match=limit):
+        e.add_request("12345", params)
+    with pytest.raises(ValueError, match=limit):
+        e.generate_batch(["ok", "12345"], params)
+
+    assert not e.scheduler.requests
+    assert not e.has_unfinished_requests()
+    assert e.scheduler.usage().reserved_kv_tokens == 0
+
+
 def test_greedy_sampling_does_not_change_rng(tiny_runner):
     e = engine(tiny_runner)
     i = e.add_request("a")
